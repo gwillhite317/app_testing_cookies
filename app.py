@@ -2,9 +2,10 @@
 import tempfile
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
-from soot_tool.auth import session_from_credentials, assert_authorized
+from soot_tool.auth import session_from_cookiejar_bytes, assert_authorized
 from soot_tool.soot_api import (
     get_campaigns,
     get_years,
@@ -18,67 +19,25 @@ from soot_tool.pipeline import run_download_convert
 st.set_page_config(page_title="NASA SOOT ICARTT Converter", layout="wide")
 st.title("NASA SOOT — ICARTT Downloader + CSV Converter")
 
-st.markdown(
-    "Enter your [NASA Earthdata Login](https://urs.earthdata.nasa.gov) credentials "
-    "to access and download SOOT data."
+st.write(
+    "Upload your Earthdata `.urs_cookies` file (Netscape cookie format). "
+    "This app uses your cookies to authorize downloads."
 )
 
-# ── Privacy notice ────────────────────────────────────────────────────────────
-with st.expander("ℹ️ How your credentials are used", expanded=False):
-    st.markdown(
-        """
-        Your username and password are used **only** to authenticate with NASA's
-        Earthdata Login (urs.earthdata.nasa.gov) on your behalf. Specifically:
+cookie_upload = st.file_uploader("Upload .urs_cookies", type=None)
 
-        - Credentials are submitted directly to NASA's OAuth2 login endpoint over HTTPS
-        - They are **never stored**, logged, or written to disk
-        - They are discarded from memory immediately after your session is established
-        - Only the resulting session cookie is retained for the duration of your visit
-        - Closing or refreshing the app ends the session entirely
-
-        This is the same authentication method used by NASA's own
-        [earthaccess](https://github.com/nsidc/earthaccess) Python library.
-        """
-    )
-
-# ── Credential inputs ─────────────────────────────────────────────────────────
-col1, col2 = st.columns(2)
-with col1:
-    username = st.text_input(
-        "Earthdata Username",
-        placeholder="Your Earthdata Login username",
-    )
-with col2:
-    password = st.text_input(
-        "Earthdata Password",
-        type="password",
-        placeholder="Your Earthdata Login password",
-    )
-
-if not username or not password:
+if cookie_upload is None:
     st.stop()
 
-# ── Session creation ──────────────────────────────────────────────────────────
-# Cache by username only — password never stored in cache key or session state.
-# If a new login is needed, the user refreshes the page.
-@st.cache_resource(show_spinner="Authenticating with NASA Earthdata...")
-def get_session(uname: str, _password: str):
-    """
-    _password is prefixed with _ so Streamlit does not include it in the
-    cache key hash — it is used only inside this function and discarded.
-    """
-    session = session_from_credentials(uname, _password)
-    assert_authorized(session)
-    return session
-
 try:
-    session = get_session(username, password)
+    session = session_from_cookiejar_bytes(cookie_upload.getvalue())
+    assert_authorized(session)
     st.success("Authorized ✅")
 except Exception as e:
     st.error(str(e))
     st.stop()
 
-# ── Campaign selection ────────────────────────────────────────────────────────
+# ---- Load selection tables ----
 with st.spinner("Loading campaigns..."):
     campaigns_df = get_campaigns(session)
 
@@ -103,7 +62,7 @@ with st.spinner("Loading PIs..."):
 pi_col = "lastname" if "lastname" in pis_df.columns else pis_df.columns[0]
 pi_lastname = st.selectbox("PI Last Name", sorted(pis_df[pi_col].astype(str).unique()))
 
-# ── Filename preview ──────────────────────────────────────────────────────────
+# ---- Fetch filenames preview ----
 with st.spinner("Fetching filenames..."):
     fn_df = get_filenames(session, campaign, year, platform, pi_lastname)
 
@@ -115,7 +74,7 @@ filenames = fn_df["filename"].dropna().astype(str).tolist()
 st.write(f"Files available: **{len(filenames)}**")
 st.dataframe(fn_df.head(200), use_container_width=True)
 
-# ── Download + convert ────────────────────────────────────────────────────────
+# ---- Run pipeline ----
 if st.button("Download + Convert", type="primary"):
     with tempfile.TemporaryDirectory() as tmp:
         workdir = Path(tmp)
