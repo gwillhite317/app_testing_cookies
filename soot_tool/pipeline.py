@@ -29,6 +29,10 @@ def download_and_extract_ict_files(
     filenames: List[str],
     out_dir: Path,
 ) -> List[Path]:
+    """
+    Download .ict files from the SOOT API using the authenticated session.
+    The Bearer token on the session header is sent with every request.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
 
     for fn in filenames:
@@ -42,8 +46,12 @@ def download_and_extract_ict_files(
             allow_redirects=True,
             timeout=180,
         )
+
         if resp.status_code != 200:
-            raise RuntimeError(f"Download failed for {fn} (HTTP {resp.status_code}).")
+            raise RuntimeError(
+                f"Download failed for {fn} (HTTP {resp.status_code}). "
+                f"Response: {(resp.text or '')[:300]}"
+            )
 
         zip_path.write_bytes(resp.content)
 
@@ -52,16 +60,11 @@ def download_and_extract_ict_files(
 
         zip_path.unlink(missing_ok=True)
 
-    # recursive, case-insensitive-ish by checking both patterns
     ict_files = list(out_dir.rglob("*.ict")) + list(out_dir.rglob("*.ICT"))
     return ict_files
 
 
 def _add_datetime_columns(df: pd.DataFrame, meta: dict) -> pd.DataFrame:
-    """
-    Your current logic: parse meta['date_info'] (first 3 items) + meta['seconds'] to build a start_datetime,
-    then for any columns containing UTC or TIME, create a Datetime variant. :contentReference[oaicite:11]{index=11}
-    """
     fmt = "%Y,%m,%d"
 
     date_info = meta.get("date_info")
