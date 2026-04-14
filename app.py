@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from soot_tool.auth import session_from_cookiejar_bytes, assert_authorized
+from soot_tool.auth import session_from_token, assert_authorized
 from soot_tool.soot_api import (
     get_campaigns,
     get_years,
@@ -19,19 +19,33 @@ from soot_tool.pipeline import run_download_convert
 st.set_page_config(page_title="NASA SOOT ICARTT Converter", layout="wide")
 st.title("NASA SOOT — ICARTT Downloader + CSV Converter")
 
-st.write(
-    "Upload your Earthdata `.urs_cookies` file (Netscape cookie format). "
-    "This app uses your cookies to authorize downloads."
+st.write("Enter your NASA Earthdata Bearer Token to authorize downloads.")
+st.markdown(
+    "1. Log in at [urs.earthdata.nasa.gov](https://urs.earthdata.nasa.gov)\n"
+    "2. Click **Generate Token** from the top-right menu\n"
+    "3. Click **Show Token**, copy it, and paste it below\n\n"
+    "_Tokens are valid for 60 days and can be revoked at any time._"
 )
 
-cookie_upload = st.file_uploader("Upload .urs_cookies", type=None)
+user_token = st.text_input(
+    "Earthdata Bearer Token",
+    type="password",
+    placeholder="Paste your token here...",
+)
 
-if cookie_upload is None:
+if not user_token:
     st.stop()
 
-try:
-    session = session_from_cookiejar_bytes(cookie_upload.getvalue())
+
+@st.cache_resource(show_spinner="Authenticating with NASA Earthdata...")
+def get_session(token: str) -> "requests.Session":
+    session = session_from_token(token)
     assert_authorized(session)
+    return session
+
+
+try:
+    session = get_session(user_token)
     st.success("Authorized ✅")
 except Exception as e:
     st.error(str(e))
